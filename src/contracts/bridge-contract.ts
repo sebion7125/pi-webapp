@@ -19,11 +19,25 @@ export interface ViewUsage {
   totalTokens: number;
   cost: number;
 }
+/** One labelled group of protocol lines; `key` is the field name written by the protocol entry. */
+export interface ViewProtocolSection {
+  key: string;
+  items: string[];
+}
+/** Display-only projection of a persistent session protocol entry (`custom` entry). It never enters model context. */
+export interface ViewProtocol {
+  /** Turn the protocol describes; null when the entry carries none. */
+  turn: number | null;
+  /** How the entry was produced, for example inline, followup, backfill or missing. */
+  source: string | null;
+  sections: ViewProtocolSection[];
+}
 export interface ViewMessage {
   id: string;
-  role: "user" | "assistant" | "tool" | "notice";
+  role: "user" | "assistant" | "tool" | "notice" | "protocol";
   timestamp: string;
   blocks: ViewBlock[];
+  protocol?: ViewProtocol;
   isError?: boolean;
   toolCallId?: string;
   toolName?: string;

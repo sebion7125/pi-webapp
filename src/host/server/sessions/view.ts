@@ -2,11 +2,17 @@ import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-a
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { displayUserMessage } from "../../../contracts/user-message.ts";
 import type { PluginEntry } from "@chengzhiyi/pi-web-protocol";
-import type { SessionView, ViewBlock, ViewMessage, ViewUsage } from "../../../contracts/bridge-contract.ts";
-export type { SessionView, ViewBlock, ViewMessage, ViewUsage } from "../../../contracts/bridge-contract.ts";
+import type { SessionView, ViewBlock, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
+export type { SessionView, ViewBlock, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
 
 export const PAUSED_ENTRY = 'pi-webapp/paused';
 export const RESUME_MESSAGE = 'pi-webapp/resume';
+/** `pi-protokoll` stores its per-turn protocol as a `custom` entry under this customType. */
+export const PROTOKOLL_ENTRY = 'protokoll';
+const PROTOCOL_SECTION_ORDER = ["result", "decision", "files", "open", "rule", "revoke", "index", "tags", "other"];
+const PROTOCOL_MAX_SECTIONS = 24;
+const PROTOCOL_MAX_ITEMS = 20;
+const PROTOCOL_MAX_ITEM_CHARS = 4000;
 
 /** A branch-local marker also covers cancellation during tool execution. */
 export function sessionPaused(entries: readonly SessionEntry[]): boolean {
@@ -61,7 +67,39 @@ export function contentBlocks(content: string | readonly ContentPart[]): ViewBlo
   });
 }
 
+/** Protocol entries stay display-only: unknown, missing or extra fields degrade to fewer sections. */
+export function projectProtocolEntry(data: unknown): ViewProtocol | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const entry = data as Record<string, unknown>;
+  const fields = typeof entry.fields === "object" && entry.fields !== null && !Array.isArray(entry.fields)
+    ? entry.fields as Record<string, unknown> : {};
+  const keys = [...PROTOCOL_SECTION_ORDER.filter(key => key in fields), ...Object.keys(fields).filter(key => !PROTOCOL_SECTION_ORDER.includes(key))];
+  const sections: ViewProtocolSection[] = [];
+  for (const key of keys) {
+    if (sections.length >= PROTOCOL_MAX_SECTIONS) break;
+    const value = fields[key];
+    const items = (Array.isArray(value) ? value : typeof value === "string" ? [value] : [])
+      .filter((item): item is string => typeof item === "string")
+      .map(item => item.trim()).filter(Boolean).slice(0, PROTOCOL_MAX_ITEMS)
+      .map(item => item.length > PROTOCOL_MAX_ITEM_CHARS ? `${item.slice(0, PROTOCOL_MAX_ITEM_CHARS)}…` : item);
+    if (!items.length) continue;
+    sections.push({ key, items });
+  }
+  return {
+    turn: Number.isSafeInteger(entry.turn) && (entry.turn as number) >= 0 ? entry.turn as number : null,
+    source: typeof entry.source === "string" ? entry.source.slice(0, 40) : null,
+    sections,
+  };
+}
+
 export function projectEntry(entry: SessionEntry): ViewMessage | null {
+  if (entry.type === "custom") {
+    // Only the protocol entries become cards; every other custom entry keeps its old behaviour.
+    if (entry.customType !== PROTOKOLL_ENTRY) return null;
+    const protocol = projectProtocolEntry(entry.data);
+    if (!protocol) return null;
+    return { id: entry.id, role: "protocol", timestamp: entry.timestamp, blocks: [], protocol };
+  }
   if (entry.type === "custom_message") {
     if (!entry.display) return null;
     return {

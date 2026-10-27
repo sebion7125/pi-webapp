@@ -17,14 +17,17 @@ const optionalStrings = (value: RecordValue, keys: readonly string[]) => keys.ev
 function message(value: unknown): value is ViewMessage {
   return record(value)
     && strings(value, ["id", "timestamp"])
-    && ["user", "assistant", "tool", "notice"].includes(value.role as string)
+    && ["user", "assistant", "tool", "notice", "protocol"].includes(value.role as string)
     && array(block => record(block) && ["text", "thinking", "image", "toolCall"].includes(block.kind as string)
       && string(block.text) && optionalStrings(block, ["toolName", "toolCallId"]))(value.blocks)
     && optionalStrings(value, ["toolName", "toolCallId", "model", "error"])
     && optional(value, "isError", boolean)
     && optional(value, "usage", usage => record(usage)
       && ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"].every(key => number(usage[key]))
-      && optional(usage, "reasoning", number));
+      && optional(usage, "reasoning", number))
+    && optional(value, "protocol", protocol => record(protocol)
+      && optional(protocol, "turn", nullable(number)) && optional(protocol, "source", nullable(string))
+      && array(section => record(section) && string(section.key) && array(string)(section.items))(protocol.sections));
 }
 
 function session(value: unknown): value is SessionView {
