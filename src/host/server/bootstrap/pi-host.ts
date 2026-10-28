@@ -239,6 +239,24 @@ function publishSnapshot(ctx: ExtensionContext): void {
   if (shared.selected === "tui") shared.bridge?.publish({ type: "snapshot", session: snapshot() });
 }
 
+/**
+ * Pi keeps `isIdle()` false until the compaction call has fully unwound, which happens after its
+ * `session_compact` event, so the snapshot published there still reads as working. Republish once
+ * the session is idle again, otherwise the browser timer of a finished compaction runs forever.
+ * A run that continues past compaction reports through its own events, so it is left alone.
+ */
+function publishAfterSettling(ctx: ExtensionContext): void {
+  const sessionId = ctx.sessionManager.getSessionId();
+  let attempts = 0;
+  const settle = () => {
+    if (shared.current !== ctx || shared.current.sessionManager.getSessionId() !== sessionId) return;
+    if (ctx.isIdle()) { publishSnapshot(ctx); return; }
+    if (++attempts >= 100) return;
+    setTimeout(settle, 50);
+  };
+  settle();
+}
+
 function settingsForCurrent() {
   if (shared.current === null) throw new Error("没有活动会话");
   const cwd = shared.selected === "sdk" ? shared.workspaceSessions?.path : shared.current.cwd;
@@ -400,8 +418,11 @@ export default function piWeb(pi: ExtensionAPI, openPage: (url: string) => Promi
     void publishWorkspaces();
   });
   pi.on("session_info_changed", (_event, ctx) => publishSnapshot(ctx));
-  // Compaction appends its own entries outside the message flow, so the browser needs a snapshot here.
-  pi.on("session_compact", (_event, ctx) => publishSnapshot(ctx));
+  // Compaction appends its own entries outside the message flow, so the browser needs a snapshot at
+  // each edge: the pass starts the working state, the trailing one ends it.
+  pi.on("session_before_compact", (_event, ctx) => publishSnapshot(ctx));
+  pi.on("session_compact", (_event, ctx) => { publishSnapshot(ctx); publishAfterSettling(ctx); });
+  pi.on("session_compact_failed", (_event, ctx) => publishSnapshot(ctx));
   pi.on("message_update", (event, ctx) => {
     shared.current = ctx;
     if (event.message.role !== "assistant") return;

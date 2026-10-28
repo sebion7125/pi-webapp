@@ -296,6 +296,20 @@ test("web keeps a fresh Pi sender after creating a session", async () => {
     const tuiBridge = new URL(pageUrl);
     const tuiSession = await fetch(`${tuiBridge.origin}/api/session`, { headers: { Authorization: `Bearer ${tuiBridge.hash.slice(1)}` } });
     assert.equal((await tuiSession.json()).sessionId, "new");
+    // Compaction runs outside the message flow: the browser needs the pass to start the working
+    // state and Pi only clears that flag after session_compact returns, so it must be ended again.
+    const observedBridge = shared.bridge!;
+    const realPublish = observedBridge.publish.bind(observedBridge);
+    const published: boolean[] = [];
+    observedBridge.publish = (event) => { if (event.type === "snapshot") published.push(event.session.idle); realPublish(event); };
+    busy = true;
+    await handlers.get("session_before_compact")?.({}, fresh);
+    await handlers.get("session_compact")?.({}, fresh);
+    assert.deepEqual(published, [false, false], "both edges of the pass reach the browser while Pi is compacting");
+    busy = false;
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(published.at(-1), true, "a finished compaction must stop the browser's working timer");
+    observedBridge.publish = realPublish;
   } finally {
     await (shared.workspaceSessions as { dispose(): Promise<void> } | null)?.dispose();
     shared.workspaceSessions = null;

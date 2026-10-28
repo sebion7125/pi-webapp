@@ -206,7 +206,9 @@ export class WorkspaceSessions {
           }
         }
         if (event.type === "agent_settled") this.scheduleQueued(runtime);
-        if (["message_end", "agent_start", "agent_settled", "session_info_changed", "entry_appended", "queue_update"].includes(event.type)) {
+        // Compaction lives outside the message flow: it starts the working state and ends it again
+        // without emitting a message event, so both edges need their own snapshot.
+        if (["message_end", "agent_start", "agent_settled", "session_info_changed", "entry_appended", "queue_update", "compaction_start", "compaction_end"].includes(event.type)) {
           if ((event.type === "message_end" && event.message.role === "assistant") || event.type === "agent_settled") {
             runtime.streaming = null;
             publish({ type: "stream", message: null });
