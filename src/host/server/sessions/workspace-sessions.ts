@@ -1,8 +1,10 @@
-import { createAgentSession, createEventBus, DefaultResourceLoader, getAgentDir, SessionManager, type AgentSession, type EventBusController, type ExtensionContext, type SessionShutdownEvent, type ToolDefinition, VERSION } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, createEventBus, DefaultPackageManager, DefaultResourceLoader, getAgentDir, SessionManager, SettingsManager, type AgentSession, type EventBusController, type ExtensionContext, type SessionShutdownEvent, type ToolDefinition, VERSION } from "@earendil-works/pi-coding-agent";
 import { invokeWebAction, WebInteractionHost, PLUGIN_CHANGED, type ActionRequest } from "@chengzhiyi/pi-web-protocol";
 import { realpath } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { contentBlocks, projectCompactProgress, projectEntry, projectPluginEntries, PROTOKOLL_PROGRESS_CHANNEL, sessionTitle, sessionPaused, PAUSED_ENTRY, type SessionView, type ViewCompactProgress, type ViewMessage } from "./view.ts";
-import { WebPluginCatalog } from "../plugins/web-plugins.ts";
+import { WebPluginCatalog, packageRootFor } from "../plugins/web-plugins.ts";
 import { sessionsForWorkspace } from "./sessions-for-workspace.ts";
 import { requireWorkspaceDirectory } from "../workspaces/workspaces.ts";
 import { LifecycleQueue, closeAgentSession } from "./lifecycle.ts";
@@ -17,6 +19,30 @@ import { ToolDiagnostics } from "../../../platform/telemetry/tool-diagnostics.ts
 
 import type { HostedAgentAdapter } from "../plugins/hosted/agent-adapter.ts";
 import type { HostedScope } from "@chengzhiyi/pi-web-protocol";
+
+/**
+ * The extensions the user enabled, so a hosted session behaves like the terminal one: compaction,
+ * protocols and every other extension behaviour has to look the same from the browser. pi-webapp's
+ * own extension stays out — it would start a second bridge — and packages that already come in as
+ * web plugins stay out too, because `pluginRuntimePaths` resolves those and they would register twice.
+ */
+export async function userExtensionPaths(cwd: string, projectTrusted: boolean, pluginRoots: readonly string[]): Promise<string[]> {
+  const own = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+  const ownRoot = await realpath(own).catch(() => own);
+  const inside = (root: string, candidate: string) => candidate === root || candidate.startsWith(root + sep);
+  const manager = new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: SettingsManager.create(cwd, undefined, { projectTrusted }) });
+  const resolved = await manager.resolve(async () => "skip");
+  const paths: string[] = [];
+  for (const item of resolved.extensions) {
+    if (!item.enabled) continue;
+    const raw = await packageRootFor(item.path);
+    const root = raw ? await realpath(raw).catch(() => raw) : null;
+    if (root && inside(ownRoot, root)) continue;
+    if (root && pluginRoots.some(plugin => inside(root, plugin) || inside(plugin, root))) continue;
+    paths.push(item.path);
+  }
+  return paths;
+}
 
 export interface HostedWorkspaceOptions {
   adapter: HostedAgentAdapter;
@@ -164,14 +190,19 @@ export class WorkspaceSessions {
     const catalog = await WebPluginCatalog.discover(cwd, this.isProjectTrusted(cwd));
     const bus = createEventBus();
     const runtimePaths = await pluginRuntimePaths(cwd, catalog.extensionRoots);
-    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir(), noExtensions: true, additionalExtensionPaths: runtimePaths.paths, eventBus: bus,
+    const userPaths = await userExtensionPaths(cwd, this.isProjectTrusted(cwd), catalog.extensionRoots);
+    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir(), noExtensions: true, additionalExtensionPaths: [...runtimePaths.paths, ...userPaths], eventBus: bus,
       extensionFactories: this.hosted ? [this.hosted.adapter.extension(this.hosted.scope(cwd, manager.getSessionId()))] : [],
     });
     let candidate: WorkspaceRuntime | null = null;
     try {
       await resourceLoader.reload();
       const loadErrors = resourceLoader.getExtensions().errors;
-      if (loadErrors.length) throw new Error(loadErrors.map(item => `${item.path}: ${item.error}`).join("; "));
+      // one broken user extension must not make the whole workspace session unusable; the plugin
+      // runtime paths keep their old strict behaviour
+      const strict = loadErrors.filter(item => !userPaths.includes(item.path));
+      for (const item of loadErrors) if (userPaths.includes(item.path)) console.error(`workspace session: extension ${item.path} did not load: ${item.error}`);
+      if (strict.length) throw new Error(strict.map(item => `${item.path}: ${item.error}`).join("; "));
       const model = manager.buildSessionProjection().model ? undefined : this.active?.session.model ?? this.fallbackModel();
       const { session } = await createAgentSession({ cwd, sessionManager: manager, model, resourceLoader, customTools: this.customTools });
       const tools = new ToolDiagnostics({ enabled: () => this.telemetry.enabled(), capture: this.reportError, breadcrumb: (category, context) => this.telemetry.breadcrumb(category, context), anonymize: value => this.telemetry.anonymize(value) });

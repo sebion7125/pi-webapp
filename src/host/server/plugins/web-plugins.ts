@@ -20,7 +20,7 @@ export function pluginDevRoots(): string[] {
   return (process.env.PI_WEBAPP_PLUGIN_DEV_ROOTS ?? "").split(delimiter).filter(Boolean).map((item) => resolve(item));
 }
 
-async function packageRootFor(extensionPath: string): Promise<string | null> {
+export async function packageRootFor(extensionPath: string): Promise<string | null> {
   let directory = dirname(extensionPath);
   while (directory !== parse(directory).root) {
     try { await stat(join(directory, "package.json")); return directory; }
