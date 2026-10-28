@@ -8,7 +8,7 @@ import type {
 } from "../../contracts/bridge-contract.ts";
 import { parseBridgeEvent } from "../../contracts/bridge-events.ts";
 export type {
-  ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactStep, ViewProtocol, ViewProtocolSection, ViewUsage, WorkspaceView, WorkspaceSessionView, WorkspaceListView,
+  ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactProgressLine, ViewCompactStep, ViewProtocol, ViewProtocolSection, ViewUsage, WorkspaceView, WorkspaceSessionView, WorkspaceListView,
   DirectoryEntry, DirectoryListing, DirectoryPickerKind, ModelOption, CommandOption,
   AttachmentReceipt, ConfigKind, ConfigScope, ResourceItem, ConfigView, UpdateStatus, UpdateChannel, UpdateRequest,
   LoginMethod, ProviderView, ProviderModelFields, ProviderModelRow, ProviderModelsView,

@@ -62,7 +62,10 @@ function session(value: unknown): value is SessionView {
     && optional(value, "compactProgress", nullable(progress => record(progress)
       && strings(progress, ["session", "run", "title", "label"])
       && ["wait", "run", "ok", "fail"].includes(progress.state as string) && boolean(progress.closed)
-      && Number.isSafeInteger(progress.step) && Number.isSafeInteger(progress.steps) && number(progress.ms)));
+      && Number.isSafeInteger(progress.step) && Number.isSafeInteger(progress.steps) && number(progress.ms)
+      && optional(progress, "lines", array(step => record(step) && string(step.label)
+        && ["wait", "run", "ok", "fail"].includes(step.state as string) && boolean(step.thinking)
+        && optional(step, "ms", nullable(number)) && optional(step, "chars", nullable(number))))));
 }
 
 function workspaces(value: unknown): value is WorkspaceListView {

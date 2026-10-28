@@ -138,13 +138,28 @@ test("the compaction card joins the turn it happened in and repeated snapshots s
 // is shown while the pass runs and never stored, unlike the status entry above.
 const progressLine = (data: Record<string, unknown> = {}) => ({
   version: 1, session: "s1", run: "compaction", title: "protokoll compaction", step: 2, steps: 5,
-  label: "fold backlog", state: "run", ms: 4200, closed: false, ...data,
+  label: "fold backlog", state: "run", ms: 4200, closed: false,
+  lines: [
+    { label: "collect protocols", state: "ok", ms: 1200, chars: 0, thinking: false },
+    { label: "fold backlog", state: "run", ms: 3000, chars: 1400, thinking: true },
+    { label: "write the summary", state: "wait", ms: null, chars: 0, thinking: false, note: "skipped" },
+    { label: "bogus", state: "maybe", chars: -5 },
+  ],
+  ...data,
 });
 
-test("a live progress line carries the current step, and an unusable payload carries nothing", () => {
+const progressLines = [
+  { label: "collect protocols", state: "ok", ms: 1200, chars: 0, thinking: false, note: null },
+  { label: "fold backlog", state: "run", ms: 3000, chars: 1400, thinking: true, note: null },
+  { label: "write the summary", state: "wait", ms: null, chars: 0, thinking: false, note: "skipped" },
+  // an unknown state, a negative count and a missing time degrade instead of guessing
+  { label: "bogus", state: "wait", ms: null, chars: null, thinking: false, note: null },
+];
+
+test("a live progress line carries every step of the pass, and an unusable payload carries nothing", () => {
   assert.deepEqual(projectCompactProgress(progressLine()), {
     session: "s1", run: "compaction", title: "protokoll compaction", step: 2, steps: 5,
-    label: "fold backlog", state: "run", ms: 4200, closed: false,
+    label: "fold backlog", state: "run", ms: 4200, closed: false, lines: progressLines,
   });
   assert.equal(projectCompactProgress(progressLine({ closed: true }))?.closed, true);
   for (const bad of [undefined, null, [], "x", progressLine({ version: 2 }), progressLine({ state: "maybe" }), progressLine({ ms: -1 }), progressLine({ session: 7 })]) {
@@ -154,12 +169,13 @@ test("a live progress line carries the current step, and an unusable payload car
   assert.equal(projectCompactProgress(progressLine({ step: 1.5 }))?.step, 0);
 });
 
-test("the wire accepts a progress line and rejects a broken one", () => {
+test("the wire accepts a projected progress status and rejects a broken one", () => {
   const view = {
     schemaVersion: 1, sessionId: "s1", cwd: "/tmp/x", name: "x", model: null, thinkingLevel: null,
     thinkingLevels: [], idle: false, contextUsage: null, messages: [], pluginEntries: [],
-    compactProgress: progressLine(),
+    compactProgress: projectCompactProgress(progressLine()),
   };
   assert.equal(parseBridgeEvent({ type: "snapshot", session: view }).type, "snapshot");
   assert.throws(() => parseBridgeEvent({ type: "snapshot", session: { ...view, compactProgress: { ...progressLine(), state: "maybe" } } }));
+  assert.throws(() => parseBridgeEvent({ type: "snapshot", session: { ...view, compactProgress: { ...progressLine(), lines: [{ label: "x", state: "maybe" }] } } }));
 });

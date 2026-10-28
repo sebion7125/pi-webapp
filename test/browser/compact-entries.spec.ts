@@ -125,7 +125,15 @@ test("the steps of a running pi-protokoll pass show live and leave when it ends"
     thinkingLevel: "off", thinkingLevels: ["off"], idle: false, contextUsage: null,
     messages: [{ id: "user-1", role: "user", timestamp: "2026-01-01T00:00:00Z", blocks: [{ kind: "text", text: "Compact the session" }] }],
     pluginEntries: [], streaming: null,
-    compactProgress: { session: "compact-live", run: "compaction", title: "protokoll compaction", step: 3, steps: 5, label: "fold backlog", state: "run", ms: 4200, closed: false },
+    compactProgress: {
+      session: "compact-live", run: "compaction", title: "protokoll compaction", step: 3, steps: 4, label: "fold backlog", state: "run", ms: 4200, closed: false,
+      lines: [
+        { label: "collect protocols", state: "ok", ms: 1200, chars: 0, thinking: false, note: null },
+        { label: "review rules", state: "fail", ms: 900, chars: 0, thinking: false, note: "provider refused" },
+        { label: "fold backlog", state: "run", ms: 3000, chars: 1400, thinking: true, note: null },
+        { label: "write the summary", state: "wait", ms: null, chars: 0, thinking: false, note: null },
+      ],
+    },
   };
   const bridge = await startBridge(fakeHost(cwd, () => session), fileURLToPath(new URL("../../web/dist/", import.meta.url)), new NodeTelemetry({ env: { PI_WEB_SENTRY_ENABLED: "false" }, monitor: false }));
   const errors: string[] = [];
@@ -136,17 +144,38 @@ test("the steps of a running pi-protokoll pass show live and leave when it ends"
     await page.goto(bridge.url);
     const live = page.locator("[data-compact-progress]");
     await expect(live).toHaveCount(1);
-    await expect(live).toHaveAttribute("data-compact-progress-steps", "5");
+    await expect(live).toHaveAttribute("data-compact-progress-steps", "4");
     await expect(live).toHaveAttribute("data-compact-progress-step", "3");
+    await expect(live).toHaveAttribute("data-compact-progress-lines", "4");
     await expect(live).toContainText("protokoll compaction");
-    await expect(live).toContainText("step 3/5");
-    await expect(live).toContainText("fold backlog");
+    await expect(live).toContainText("step 3/4");
+
+    // the full status the console widget shows: every step, its own time, and what the model has written
+    await expect(page.locator("[data-compact-progress-line]")).toHaveCount(4);
+    await expect(page.locator('[data-compact-progress-line-state="ok"]')).toContainText("collect protocols");
+    await expect(page.locator('[data-compact-progress-line-state="ok"]')).toContainText("1.2 s");
+    await expect(page.locator('[data-compact-progress-line-state="fail"]')).toContainText("provider refused");
+    await expect(page.locator('[data-compact-progress-line-state="run"]')).toContainText("thinking ≈ 400 tokens");
+    await expect(page.locator('[data-compact-progress-line-state="run"]')).toHaveAttribute("data-compact-progress-line-chars", "1400");
+    await expect(page.locator('[data-compact-progress-line-state="wait"]')).toContainText("write the summary");
 
     // the next step arrives with the next line, and nothing lands in the transcript
-    session = { ...session, compactProgress: { ...session.compactProgress!, step: 4, label: "write the summary", ms: 9100 } };
+    session = {
+      ...session,
+      compactProgress: {
+        ...session.compactProgress!, step: 4, label: "write the summary", ms: 9100,
+        lines: [
+          { label: "collect protocols", state: "ok", ms: 1200, chars: 0, thinking: false, note: null },
+          { label: "review rules", state: "fail", ms: 900, chars: 0, thinking: false, note: "provider refused" },
+          { label: "fold backlog", state: "ok", ms: 4100, chars: 1400, thinking: true, note: null },
+          { label: "write the summary", state: "run", ms: 100, chars: 0, thinking: false, note: null },
+        ],
+      },
+    };
     bridge.publish({ type: "snapshot", session });
     await expect(live).toHaveCount(1);
-    await expect(live).toContainText("write the summary");
+    await expect(page.locator('[data-compact-progress-line-state="run"]')).toContainText("reading context");
+    await expect(page.locator('[data-compact-progress-line-state="ok"]')).toHaveCount(2);
     await expect(page.locator("[data-message-role='assistant']")).toHaveCount(0);
 
     // the pass is over: the line goes away, the stored card arrives with the status entry

@@ -2,8 +2,8 @@ import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-a
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { displayUserMessage } from "../../../contracts/user-message.ts";
 import type { PluginEntry } from "@chengzhiyi/pi-web-protocol";
-import type { SessionView, ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
-export type { SessionView, ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
+import type { SessionView, ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactProgressLine, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
+export type { SessionView, ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactProgressLine, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
 
 export const PAUSED_ENTRY = 'pi-webapp/paused';
 export const RESUME_MESSAGE = 'pi-webapp/resume';
@@ -20,6 +20,7 @@ const PROTOCOL_MAX_ITEM_CHARS = 4000;
 const COMPACT_MAX_STEPS = 40;
 const COMPACT_MAX_NOTES = 12;
 const COMPACT_MAX_CHARS = 500;
+const PROGRESS_MAX_LINES = 60;
 
 /** A branch-local marker also covers cancellation during tool execution. */
 export function sessionPaused(entries: readonly SessionEntry[]): boolean {
@@ -141,6 +142,10 @@ export function projectCompactEntry(data: unknown): ViewCompact | null {
   };
 }
 
+function progressState(value: unknown): ViewCompactProgress["state"] | null {
+  return value === "wait" || value === "run" || value === "ok" || value === "fail" ? value : null;
+}
+
 /**
  * One live line from `pi-protokoll`'s bus report. Bus payloads come from another extension, so
  * anything unusable degrades to null and the browser simply shows nothing.
@@ -148,9 +153,20 @@ export function projectCompactEntry(data: unknown): ViewCompact | null {
 export function projectCompactProgress(data: unknown): ViewCompactProgress | null {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
   const line = data as Record<string, unknown>;
-  const state = line.state === "wait" || line.state === "run" || line.state === "ok" || line.state === "fail" ? line.state : null;
+  const state = progressState(line.state);
   const whole = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
   if (line.version !== 1 || typeof line.session !== "string" || !state || compactNumber(line.ms) === null) return null;
+  const lines: ViewCompactProgressLine[] = Array.isArray(line.lines) ? line.lines.slice(0, PROGRESS_MAX_LINES).map(step => {
+    const value = (typeof step === "object" && step !== null ? step : {}) as Record<string, unknown>;
+    return {
+      label: compactText(value.label) ?? "",
+      state: progressState(value.state) ?? "wait",
+      ms: compactNumber(value.ms),
+      chars: compactNumber(value.chars),
+      thinking: value.thinking === true,
+      note: compactText(value.note),
+    };
+  }) : [];
   return {
     session: line.session,
     run: compactText(line.run) ?? "",
@@ -160,6 +176,7 @@ export function projectCompactProgress(data: unknown): ViewCompactProgress | nul
     label: compactText(line.label) ?? "",
     state,
     ms: compactNumber(line.ms) as number,
+    lines,
     closed: line.closed === true,
   };
 }

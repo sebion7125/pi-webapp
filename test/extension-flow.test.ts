@@ -313,11 +313,13 @@ test("web keeps a fresh Pi sender after creating a session", async () => {
     await new Promise(resolve => setTimeout(resolve, 200));
     assert.equal(published.at(-1), true, "a finished compaction must stop the browser's working timer");
     // the steps of a running pass reach the browser over the shared bus, without being stored
-    progressBus.emit(PROTOKOLL_PROGRESS_CHANNEL, { version: 1, session: "new", run: "compaction", title: "protokoll compaction", step: 2, steps: 5, label: "older turns into the state of work", state: "run", ms: 4200, closed: false });
+    progressBus.emit(PROTOKOLL_PROGRESS_CHANNEL, { version: 1, session: "new", run: "compaction", title: "protokoll compaction", step: 2, steps: 5, label: "older turns into the state of work", state: "run", ms: 4200, closed: false, lines: [{ label: "collect protocols", state: "ok", ms: 1200, chars: 0, thinking: false }, { label: "older turns into the state of work", state: "run", ms: 3000, chars: 1400, thinking: true }] });
     assert.equal(liveLines.at(-1), "older turns into the state of work", "a bus line publishes the current step");
     const live = await (await fetch(`${tuiBridge.origin}/api/session`, { headers: { Authorization: `Bearer ${tuiBridge.hash.slice(1)}` } })).json();
     assert.equal(live.compactProgress?.steps, 5);
     assert.equal(live.compactProgress?.ms, 4200);
+    assert.equal(live.compactProgress?.lines?.[1]?.chars, 1400, "the browser sees how much the model has already written");
+    assert.equal(live.compactProgress?.lines?.[1]?.thinking, true);
     progressBus.emit(PROTOKOLL_PROGRESS_CHANNEL, { version: 1, session: "other", run: "compaction", title: "t", step: 1, steps: 1, label: "another session", state: "run", ms: 1, closed: false });
     assert.equal(liveLines.at(-1), "older turns into the state of work", "another session's pass never shows up here");
     progressBus.emit(PROTOKOLL_PROGRESS_CHANNEL, { version: 1, session: "new", run: "compaction", title: "protokoll compaction", step: 5, steps: 5, label: "", state: "ok", ms: 9000, closed: true });

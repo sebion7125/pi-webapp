@@ -75,8 +75,22 @@ export interface ViewCompactProgress {
   state: "wait" | "run" | "ok" | "fail";
   /** wall time of the whole pass so far in milliseconds */
   ms: number;
+  /** every step of the pass, in order — the same status the console widget shows */
+  lines: ViewCompactProgressLine[];
   /** last line of the pass: the stored status entry follows, so the line can disappear */
   closed: boolean;
+}
+/** One step of a running pass: how far the model already is. */
+export interface ViewCompactProgressLine {
+  label: string;
+  state: "wait" | "run" | "ok" | "fail";
+  /** wall time of this step so far, null while it has not started */
+  ms: number | null;
+  /** characters the model has sent for this step so far, thinking included */
+  chars: number | null;
+  /** true while those characters are thinking instead of answer text */
+  thinking: boolean;
+  note: string | null;
 }
 export interface ViewMessage {
   id: string;
