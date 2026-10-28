@@ -1,0 +1,177 @@
+/* Compaction status row: the same 24px disclosure chrome as the protocol row,
+   so the two cards read as one family. Collapsed it shows the duration and the
+   counts, expanded it lists every step with the time it took. Text sizes ride
+   the same axis as the other flow rows (secondary tier + body px delta). */
+
+.root {
+  display: flex;
+  flex-direction: column;
+}
+
+.root:not([data-expanded]) {
+  contain: size layout;
+  height: calc(24px + var(--piw-content-font-delta, 0px));
+}
+
+.row {
+  position: relative;
+  overflow: hidden;
+}
+
+.leading {
+  flex-shrink: 0;
+}
+
+.chevron {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.title {
+  font-weight: 400;
+}
+
+.separator {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--dsw-alias-label-caption);
+}
+
+/* The duration is the point of this card, so it sits outside the ellipsis. */
+.duration {
+  flex: none;
+  margin-right: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: var(--piw-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--piw-content-font-delta, 0px));
+}
+
+.summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--piw-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--piw-content-font-delta, 0px));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.summaryText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summarySuffix {
+  flex: none;
+  margin-left: 8px;
+  white-space: nowrap;
+  font-size: var(--piw-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--piw-content-font-delta, 0px));
+  color: var(--dsw-alias-label-caption);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 4px 4px;
+  padding: 4px 0;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-markdown-code-block);
+}
+
+.section {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  align-items: baseline;
+  padding: 6px 16px;
+}
+
+.section + .section {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.sectionLabel {
+  color: var(--dsw-alias-label-caption);
+  font: var(--dsw-font-xs-13);
+}
+
+.sectionValue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-sm-13);
+}
+
+.durationValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.startedAt {
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sectionItem {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-sm-13);
+}
+
+/* One step of the pass: mark, label, optional note, and the time in its own
+   column so a long label cannot push the numbers around. */
+.sectionItem[data-compact-step-state] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.stepLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sectionItem[data-compact-step-state="fail"] .stepMark,
+.sectionItem[data-compact-step-state="fail"] .stepLabel {
+  color: var(--dsw-alias-label-warning, var(--dsw-alias-label-secondary));
+}
+
+.sectionItem[data-compact-step-state="skipped"] .stepLabel,
+.sectionItem[data-compact-step-state="skipped"] .stepTime {
+  color: var(--dsw-alias-label-caption);
+}
+
+.stepMark {
+  color: var(--dsw-alias-label-caption);
+}
+
+.stepNote {
+  color: var(--dsw-alias-label-caption);
+}
+
+.stepTime {
+  margin-left: auto;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

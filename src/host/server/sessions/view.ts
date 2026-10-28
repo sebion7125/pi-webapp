@@ -2,17 +2,22 @@ import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-a
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { displayUserMessage } from "../../../contracts/user-message.ts";
 import type { PluginEntry } from "@chengzhiyi/pi-web-protocol";
-import type { SessionView, ViewBlock, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
-export type { SessionView, ViewBlock, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
+import type { SessionView, ViewBlock, ViewCompact, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
+export type { SessionView, ViewBlock, ViewCompact, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
 
 export const PAUSED_ENTRY = 'pi-webapp/paused';
 export const RESUME_MESSAGE = 'pi-webapp/resume';
 /** `pi-protokoll` stores its per-turn protocol as a `custom` entry under this customType. */
 export const PROTOKOLL_ENTRY = 'protokoll';
+/** `pi-protokoll` stores how each compaction pass went, including the time of every step, under this customType. */
+export const PROTOKOLL_COMPACT_ENTRY = 'protokoll-compact';
 const PROTOCOL_SECTION_ORDER = ["result", "decision", "files", "open", "rule", "revoke", "index", "tags", "other"];
 const PROTOCOL_MAX_SECTIONS = 24;
 const PROTOCOL_MAX_ITEMS = 20;
 const PROTOCOL_MAX_ITEM_CHARS = 4000;
+const COMPACT_MAX_STEPS = 40;
+const COMPACT_MAX_NOTES = 12;
+const COMPACT_MAX_CHARS = 500;
 
 /** A branch-local marker also covers cancellation during tool execution. */
 export function sessionPaused(entries: readonly SessionEntry[]): boolean {
@@ -92,8 +97,56 @@ export function projectProtocolEntry(data: unknown): ViewProtocol | null {
   };
 }
 
+/** A duration or a count; anything else stays null so the card says "unknown" instead of guessing. */
+function compactNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function compactText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return value.length > COMPACT_MAX_CHARS ? `${value.slice(0, COMPACT_MAX_CHARS - 1)}…` : value;
+}
+
+/** The compaction status entry of `pi-protokoll`: missing, unknown or oversized fields degrade to null or fewer steps. */
+export function projectCompactEntry(data: unknown): ViewCompact | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const entry = data as Record<string, unknown>;
+  const steps: ViewCompactStep[] = Array.isArray(entry.steps) ? entry.steps.slice(0, COMPACT_MAX_STEPS).map(step => {
+    const value = (typeof step === "object" && step !== null ? step : {}) as Record<string, unknown>;
+    return {
+      label: compactText(value.label) ?? "",
+      state: value.state === "ok" ? "ok" as const : value.state === "fail" ? "fail" as const : "skipped" as const,
+      ms: compactNumber(value.ms),
+      note: compactText(value.note),
+    };
+  }).filter(step => step.label !== "") : [];
+  return {
+    outcome: compactText(entry.outcome),
+    startedAt: compactText(entry.startedAt),
+    durationMs: compactNumber(entry.durationMs),
+    steps,
+    notes: Array.isArray(entry.notes)
+      ? entry.notes.map(compactText).filter((note): note is string => note !== null).slice(0, COMPACT_MAX_NOTES)
+      : [],
+    condensedTurns: compactNumber(entry.condensedTurns),
+    detailTurns: compactNumber(entry.detailTurns),
+    keptTurns: compactNumber(entry.keptTurns),
+    missingTurns: compactNumber(entry.missingTurns),
+    backfilled: compactNumber(entry.backfilled),
+    newlyFolded: compactNumber(entry.newlyFolded),
+    pending: compactNumber(entry.pending),
+    error: compactText(entry.error),
+  };
+}
+
 export function projectEntry(entry: SessionEntry): ViewMessage | null {
   if (entry.type === "custom") {
+    // The compaction status entry becomes its own card; every other custom entry keeps its old behaviour.
+    if (entry.customType === PROTOKOLL_COMPACT_ENTRY) {
+      const compact = projectCompactEntry(entry.data);
+      if (!compact) return null;
+      return { id: entry.id, role: "compact", timestamp: entry.timestamp, blocks: [], compact };
+    }
     // Only the protocol entries become cards; every other custom entry keeps its old behaviour.
     if (entry.customType !== PROTOKOLL_ENTRY) return null;
     const protocol = projectProtocolEntry(entry.data);

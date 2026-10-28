@@ -8,7 +8,7 @@ import inputCss from "../../../web/src/ui/conversation/InputBar.module.css";
 import heroCss from "../../../web/src/ui/conversation/HeroShell.module.css";
 import chatCss from "../../../web/src/ui/chat/ChatView.module.css";
 import messageCss from "../../../web/src/ui/chat/MessageItem.module.css";
-import type { AttachmentReceipt, ConnectionState, ModelsStatus, SessionView, ViewMessage, ViewBlock, ViewProtocol } from "./pi-bridge.ts";
+import type { AttachmentReceipt, ConnectionState, ModelsStatus, SessionView, ViewMessage, ViewBlock, ViewCompact, ViewProtocol } from "./pi-bridge.ts";
 import type { CommandOption, ModelOption } from "./pi-bridge.ts";
 import { PiMarkdown } from "./PiMarkdown.tsx";
 import { ReasoningRow } from "../../../web/src/ui/chat/ReasoningRow.tsx";
@@ -17,6 +17,7 @@ import { conversationActivity, conversationIsWorking } from "./conversation-acti
 import { useActivityElapsed } from "./use-activity-elapsed.ts";
 import { ToolRow, TurnActions, TurnProcess } from "../../../web/src/ui/chat/ProcessRow.tsx";
 import { ProtocolRow } from "../../../web/src/ui/chat/ProtocolRow.tsx";
+import { CompactRow } from "../../../web/src/ui/chat/CompactRow.tsx";
 import { useHostedTranscript } from "./hosted/transcript.ts";
 import { conversationTurns, toolResults, toolViewCalls, toolViewTurnKey, type ConversationTurn } from "./conversation-turns.ts";
 import { PiTrajectory } from "../../../web/src/ui/trajectory/PiTrajectory.tsx";
@@ -116,6 +117,7 @@ function PiTurn({ turn, results, model, loadImage, onInspect, renderPluginSlot, 
   }
   const [open, setOpen] = useState(false);
   const protocols = turn.messages.filter((message): message is ViewMessage & { protocol: ViewProtocol } => message.role === "protocol" && message.protocol !== undefined);
+  const compacts = turn.messages.filter((message): message is ViewMessage & { compact: ViewCompact } => message.role === "compact" && message.compact !== undefined);
   const toolCount = process.filter(({ block }) => block.kind === "toolCall").length;
   const messageCount = new Set(process.filter(({ block }) => block.kind !== "toolCall").map(({ message }) => message.id)).size;
   const answer = answerBlocks.map((block) => block.text).join("\n");
@@ -132,6 +134,7 @@ function PiTurn({ turn, results, model, loadImage, onInspect, renderPluginSlot, 
     {toolViewCalls(turn.messages, viewTools).map(({ key, call }) => <div key={key} data-tool-view={call.toolName}>{renderToolView?.(call, call.toolCallId ? results.get(call.toolCallId) : undefined, running && !results.has(call.toolCallId ?? ""))}</div>)}
     {answerBlocks.length > 0 && lastAssistant && <PiMessage message={{ ...lastAssistant, blocks: answerBlocks }} results={results} loadImage={loadImage} running={lastAssistant.id === "stream"} />}
     {protocols.map((message) => <ProtocolRow key={message.id} protocol={message.protocol} />)}
+    {compacts.map((message) => <CompactRow key={message.id} compact={message.compact} />)}
     {turn.messages.filter((message) => message.role === "tool" && (!message.toolCallId || !results.has(message.toolCallId))).map((message) => <PiMessage key={message.id} message={message} results={results} loadImage={loadImage} />)}
     {failures.map((message) => <div key={`${message.id}-error`} className="pi-model-error" role="alert"><strong>{t("模型请求失败", "Model request failed")}</strong><span>{/usage limit has been reached/i.test(message.error ?? "") ? t("模型服务的使用额度已耗尽。请切换模型或等待额度恢复后重试。", "The model service usage limit has been reached. Switch models or try again after the limit resets.") : message.error}</span></div>)}
     {!running && failures.length === 0 && (lastAssistant || (turn.usage && turn.usage.totalTokens > 0)) && <TurnActions text={answer} timestamp={lastAssistant?.timestamp} usage={turn.usage} model={lastAssistant?.model ?? model} />}

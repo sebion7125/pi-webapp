@@ -400,6 +400,8 @@ export default function piWeb(pi: ExtensionAPI, openPage: (url: string) => Promi
     void publishWorkspaces();
   });
   pi.on("session_info_changed", (_event, ctx) => publishSnapshot(ctx));
+  // Compaction appends its own entries outside the message flow, so the browser needs a snapshot here.
+  pi.on("session_compact", (_event, ctx) => publishSnapshot(ctx));
   pi.on("message_update", (event, ctx) => {
     shared.current = ctx;
     if (event.message.role !== "assistant") return;

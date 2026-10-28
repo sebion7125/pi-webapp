@@ -32,12 +32,39 @@ export interface ViewProtocol {
   source: string | null;
   sections: ViewProtocolSection[];
 }
+/** One step of a compaction pass with the time it took. */
+export interface ViewCompactStep {
+  label: string;
+  state: "ok" | "fail" | "skipped";
+  /** Milliseconds the step ran; null when it never started. */
+  ms: number | null;
+  note: string | null;
+}
+/** Display-only projection of a `pi-protokoll` compaction status entry (`custom` entry customType "protokoll-compact"). */
+export interface ViewCompact {
+  /** protocol: the extension wrote the summary; no_room or failed: Pi summarized instead. Null for entries written by older versions. */
+  outcome: string | null;
+  startedAt: string | null;
+  /** Wall time of the whole pass in milliseconds. */
+  durationMs: number | null;
+  steps: ViewCompactStep[];
+  notes: string[];
+  condensedTurns: number | null;
+  detailTurns: number | null;
+  keptTurns: number | null;
+  missingTurns: number | null;
+  backfilled: number | null;
+  newlyFolded: number | null;
+  pending: number | null;
+  error: string | null;
+}
 export interface ViewMessage {
   id: string;
-  role: "user" | "assistant" | "tool" | "notice" | "protocol";
+  role: "user" | "assistant" | "tool" | "notice" | "protocol" | "compact";
   timestamp: string;
   blocks: ViewBlock[];
   protocol?: ViewProtocol;
+  compact?: ViewCompact;
   isError?: boolean;
   toolCallId?: string;
   toolName?: string;

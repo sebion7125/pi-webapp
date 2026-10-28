@@ -17,7 +17,7 @@ const optionalStrings = (value: RecordValue, keys: readonly string[]) => keys.ev
 function message(value: unknown): value is ViewMessage {
   return record(value)
     && strings(value, ["id", "timestamp"])
-    && ["user", "assistant", "tool", "notice", "protocol"].includes(value.role as string)
+    && ["user", "assistant", "tool", "notice", "protocol", "compact"].includes(value.role as string)
     && array(block => record(block) && ["text", "thinking", "image", "toolCall"].includes(block.kind as string)
       && string(block.text) && optionalStrings(block, ["toolName", "toolCallId"]))(value.blocks)
     && optionalStrings(value, ["toolName", "toolCallId", "model", "error"])
@@ -27,7 +27,16 @@ function message(value: unknown): value is ViewMessage {
       && optional(usage, "reasoning", number))
     && optional(value, "protocol", protocol => record(protocol)
       && optional(protocol, "turn", nullable(number)) && optional(protocol, "source", nullable(string))
-      && array(section => record(section) && string(section.key) && array(string)(section.items))(protocol.sections));
+      && array(section => record(section) && string(section.key) && array(string)(section.items))(protocol.sections))
+    && optional(value, "compact", compact => record(compact)
+      && optional(compact, "outcome", nullable(string)) && optional(compact, "startedAt", nullable(string))
+      && optional(compact, "durationMs", nullable(number)) && optional(compact, "error", nullable(string))
+      && optional(compact, "notes", array(string))
+      && ["condensedTurns", "detailTurns", "keptTurns", "missingTurns", "backfilled", "newlyFolded", "pending"]
+        .every(key => optional(compact, key, nullable(number)))
+      && array(step => record(step) && string(step.label)
+        && ["ok", "fail", "skipped"].includes(step.state as string)
+        && optional(step, "ms", nullable(number)) && optional(step, "note", nullable(string)))(compact.steps));
 }
 
 function session(value: unknown): value is SessionView {
