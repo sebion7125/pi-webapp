@@ -1,7 +1,7 @@
 import { createAgentSession, createEventBus, DefaultResourceLoader, getAgentDir, SessionManager, type AgentSession, type EventBusController, type ExtensionContext, type SessionShutdownEvent, type ToolDefinition, VERSION } from "@earendil-works/pi-coding-agent";
 import { invokeWebAction, WebInteractionHost, PLUGIN_CHANGED, type ActionRequest } from "@chengzhiyi/pi-web-protocol";
 import { realpath } from "node:fs/promises";
-import { contentBlocks, projectEntry, projectPluginEntries, sessionTitle, sessionPaused, PAUSED_ENTRY, type SessionView, type ViewMessage } from "./view.ts";
+import { contentBlocks, projectCompactProgress, projectEntry, projectPluginEntries, PROTOKOLL_PROGRESS_CHANNEL, sessionTitle, sessionPaused, PAUSED_ENTRY, type SessionView, type ViewCompactProgress, type ViewMessage } from "./view.ts";
 import { WebPluginCatalog } from "../plugins/web-plugins.ts";
 import { sessionsForWorkspace } from "./sessions-for-workspace.ts";
 import { requireWorkspaceDirectory } from "../workspaces/workspaces.ts";
@@ -39,6 +39,8 @@ interface WorkspaceRuntime {
   agentErrorReported?: boolean;
   tools: ToolDiagnostics;
   streaming: ViewMessage | null;
+  /** live line of a `pi-protokoll` pass that is running in this workspace session */
+  compactProgress: ViewCompactProgress | null;
   prompts: EditablePromptQueue;
 }
 
@@ -173,7 +175,7 @@ export class WorkspaceSessions {
       const model = manager.buildSessionProjection().model ? undefined : this.active?.session.model ?? this.fallbackModel();
       const { session } = await createAgentSession({ cwd, sessionManager: manager, model, resourceLoader, customTools: this.customTools });
       const tools = new ToolDiagnostics({ enabled: () => this.telemetry.enabled(), capture: this.reportError, breadcrumb: (category, context) => this.telemetry.breadcrumb(category, context), anonymize: value => this.telemetry.anonymize(value) });
-      const runtime: WorkspaceRuntime = { session, cwd, catalog, bus, generation: ++this.generation, closing: false, waitController: new AbortController(), interactions: null!, detach: () => {}, releasePaths: runtimePaths.release, tools, streaming: null, prompts: null! };
+      const runtime: WorkspaceRuntime = { session, cwd, catalog, bus, generation: ++this.generation, closing: false, waitController: new AbortController(), interactions: null!, detach: () => {}, releasePaths: runtimePaths.release, tools, streaming: null, compactProgress: null, prompts: null! };
       runtime.prompts = old?.prompts ?? new EditablePromptQueue(() => {
         const owner = this.runtimes.get(manager.getSessionId()) ?? runtime;
         this.publishFor(owner, { type: "snapshot", session: this.snapshotOf(owner) });
@@ -184,6 +186,14 @@ export class WorkspaceSessions {
       runtime.interactions = new WebInteractionHost(bus, request => !runtime.closing && request.sessionId === session.sessionManager.getSessionId() && catalog.has(request.pluginId), () => publish({ type: "snapshot", session: this.snapshotOf(runtime) }));
       let lastStreamAt = 0;
       const offChanged = bus.on(PLUGIN_CHANGED, () => publish({ type: "snapshot", session: this.snapshotOf(runtime) }));
+      // pi-protokoll reports the steps of a running pass over the shared bus; those lines are never
+      // stored in the session, so the browser shows them only while the pass runs.
+      const offProgress = bus.on(PROTOKOLL_PROGRESS_CHANNEL, (data) => {
+        const progress = projectCompactProgress(data);
+        if (!progress || progress.session !== session.sessionManager.getSessionId() || this.disposed || runtime.closing) return;
+        runtime.compactProgress = progress.closed ? null : progress;
+        publish({ type: "snapshot", session: this.snapshotOf(runtime) });
+      });
       const offEvents = session.subscribe(event => {
         if (!this.disposed && !runtime.closing) {
           const context: DiagnosticFields = { ...runtime.operation, session: this.telemetry.anonymize(session.sessionManager.getSessionId()), piVersion: VERSION, model: session.model ? `${session.model.provider}/${session.model.id}` : null, thinkingLevel: session.thinkingLevel };
@@ -197,6 +207,7 @@ export class WorkspaceSessions {
           }
           if (event.type === "message_end" && event.message.role === "toolResult") tools.message(event.message, context);
           if (event.type === "agent_settled") { this.telemetry.breadcrumb("agent_end", context); tools.clear(); runtime.operation = undefined; }
+          if (event.type === "compaction_end") runtime.compactProgress = null;
         }
         if (event.type === "message_update" && event.message.role === "assistant") {
           runtime.streaming = { id: "stream", role: "assistant", timestamp: new Date(event.message.timestamp).toISOString(), blocks: contentBlocks(event.message.content) };
@@ -217,7 +228,7 @@ export class WorkspaceSessions {
           if (!this.disposed && !runtime.closing && ["message_end", "agent_start", "agent_settled", "session_info_changed"].includes(event.type)) this.onSessionsChanged();
         }
       });
-      runtime.detach = () => { offChanged(); offEvents(); };
+      runtime.detach = () => { offChanged(); offEvents(); offProgress(); };
       runtime.releaseHosted = this.hosted?.adapter.attach(session);
       const startupErrors: string[] = [];
       let initializing = true;
@@ -263,6 +274,7 @@ export class WorkspaceSessions {
       queuedPrompts: runtime.prompts.view(),
       contextUsage: session.getContextUsage() ?? null, messages,
       streaming: runtime.streaming,
+      compactProgress: runtime.compactProgress,
       interactions: runtime.interactions.pending(session.sessionManager.getSessionId()),
       pluginEntries: projectPluginEntries(session.sessionManager.getBranch(), catalog.ids()),
     };

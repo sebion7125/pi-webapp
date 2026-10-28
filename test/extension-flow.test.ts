@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import piWeb from "../src/host/server/bootstrap/pi-host.ts";
+import { PROTOKOLL_PROGRESS_CHANNEL } from "../src/host/server/sessions/view.ts";
 import type { Bridge } from "../src/host/server/transport/bridge.ts";
 import type { WorkspaceRegistry } from "../src/host/server/workspaces/workspaces.ts";
 import type { WorkspaceSessions } from "../src/host/server/sessions/workspace-sessions.ts";
@@ -18,6 +19,7 @@ test("web keeps a fresh Pi sender after creating a session", async () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = join(temporary, "agent");
   const handlers = new ExtensionHandlers();
+  const progressBus = createEventBus();
   const delivered: string[] = [];
   const deliveryOptions: unknown[] = [];
   let busy = false;
@@ -61,7 +63,7 @@ test("web keeps a fresh Pi sender after creating a session", async () => {
     },
   } as unknown as ExtensionCommandContext;
   piWeb({
-    events: createEventBus(),
+    events: progressBus,
     registerTool() {},
     on(event: string, handler: (event: unknown, ctx: unknown) => void) { return handlers.set(event, handler); },
     getActiveTools: () => [], setActiveTools() {}, getAllTools: () => [],
@@ -301,7 +303,8 @@ test("web keeps a fresh Pi sender after creating a session", async () => {
     const observedBridge = shared.bridge!;
     const realPublish = observedBridge.publish.bind(observedBridge);
     const published: boolean[] = [];
-    observedBridge.publish = (event) => { if (event.type === "snapshot") published.push(event.session.idle); realPublish(event); };
+    const liveLines: Array<string | null> = [];
+    observedBridge.publish = (event) => { if (event.type === "snapshot") { published.push(event.session.idle); liveLines.push(event.session.compactProgress?.label ?? null); } realPublish(event); };
     busy = true;
     await handlers.get("session_before_compact")?.({}, fresh);
     await handlers.get("session_compact")?.({}, fresh);
@@ -309,6 +312,18 @@ test("web keeps a fresh Pi sender after creating a session", async () => {
     busy = false;
     await new Promise(resolve => setTimeout(resolve, 200));
     assert.equal(published.at(-1), true, "a finished compaction must stop the browser's working timer");
+    // the steps of a running pass reach the browser over the shared bus, without being stored
+    progressBus.emit(PROTOKOLL_PROGRESS_CHANNEL, { version: 1, session: "new", run: "compaction", title: "protokoll compaction", step: 2, steps: 5, label: "older turns into the state of work", state: "run", ms: 4200, closed: false });
+    assert.equal(liveLines.at(-1), "older turns into the state of work", "a bus line publishes the current step");
+    const live = await (await fetch(`${tuiBridge.origin}/api/session`, { headers: { Authorization: `Bearer ${tuiBridge.hash.slice(1)}` } })).json();
+    assert.equal(live.compactProgress?.steps, 5);
+    assert.equal(live.compactProgress?.ms, 4200);
+    progressBus.emit(PROTOKOLL_PROGRESS_CHANNEL, { version: 1, session: "other", run: "compaction", title: "t", step: 1, steps: 1, label: "another session", state: "run", ms: 1, closed: false });
+    assert.equal(liveLines.at(-1), "older turns into the state of work", "another session's pass never shows up here");
+    progressBus.emit(PROTOKOLL_PROGRESS_CHANNEL, { version: 1, session: "new", run: "compaction", title: "protokoll compaction", step: 5, steps: 5, label: "", state: "ok", ms: 9000, closed: true });
+    assert.equal(liveLines.at(-1), null, "the last line of the pass takes the live row away again");
+    const settled = await (await fetch(`${tuiBridge.origin}/api/session`, { headers: { Authorization: `Bearer ${tuiBridge.hash.slice(1)}` } })).json();
+    assert.equal(settled.compactProgress ?? null, null, "a finished pass leaves nothing behind");
     observedBridge.publish = realPublish;
   } finally {
     await (shared.workspaceSessions as { dispose(): Promise<void> } | null)?.dispose();

@@ -58,6 +58,26 @@ export interface ViewCompact {
   pending: number | null;
   error: string | null;
 }
+/**
+ * One live line of a `pi-protokoll` pass that is still running. Unlike ViewCompact it is never
+ * stored in the session: it arrives over Pi's shared extension bus and is gone when the pass ends.
+ */
+export interface ViewCompactProgress {
+  /** session the pass belongs to, so other sessions can ignore it */
+  session: string;
+  /** which kind of run reports: compaction, repair, ... */
+  run: string;
+  title: string;
+  /** 1-based index of the current step */
+  step: number;
+  steps: number;
+  label: string;
+  state: "wait" | "run" | "ok" | "fail";
+  /** wall time of the whole pass so far in milliseconds */
+  ms: number;
+  /** last line of the pass: the stored status entry follows, so the line can disappear */
+  closed: boolean;
+}
 export interface ViewMessage {
   id: string;
   role: "user" | "assistant" | "tool" | "notice" | "protocol" | "compact";
@@ -106,6 +126,8 @@ export interface SessionView {
   pluginEntries: PluginEntry[];
   interactions?: WebInteraction[];
   streaming?: ViewMessage | null;
+  /** live line of a `pi-protokoll` pass that is running right now, null when none is */
+  compactProgress?: ViewCompactProgress | null;
 }
 export interface WorkspaceView {
   id: string;

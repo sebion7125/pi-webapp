@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PROTOKOLL_COMPACT_ENTRY, projectEntry, projectPluginEntries } from "../src/host/server/sessions/view.ts";
+import { PROTOKOLL_COMPACT_ENTRY, projectCompactProgress, projectEntry, projectPluginEntries } from "../src/host/server/sessions/view.ts";
 import { conversationTurns } from "../src/host/client/conversation-turns.ts";
 import { parseBridgeEvent } from "../src/contracts/bridge-events.ts";
 import type { BridgeEvent } from "../src/contracts/bridge-contract.ts";
@@ -132,4 +132,34 @@ test("the compaction card joins the turn it happened in and repeated snapshots s
   assert.deepEqual(turns[0]!.messages.map(message => message.id), ["user-1", "assistant-1", "protocol-1", "compact-1"]);
   assert.equal((turns[0]!.messages.at(-1) as ViewMessage & { compact?: ViewCompact }).compact?.durationMs, 45_000);
   assert.deepEqual(turns[1]!.messages.map(message => message.role), ["user"]);
+});
+
+// pi-protokoll 0.9.3 reports the steps of a running pass over Pi's shared extension bus: the line
+// is shown while the pass runs and never stored, unlike the status entry above.
+const progressLine = (data: Record<string, unknown> = {}) => ({
+  version: 1, session: "s1", run: "compaction", title: "protokoll compaction", step: 2, steps: 5,
+  label: "fold backlog", state: "run", ms: 4200, closed: false, ...data,
+});
+
+test("a live progress line carries the current step, and an unusable payload carries nothing", () => {
+  assert.deepEqual(projectCompactProgress(progressLine()), {
+    session: "s1", run: "compaction", title: "protokoll compaction", step: 2, steps: 5,
+    label: "fold backlog", state: "run", ms: 4200, closed: false,
+  });
+  assert.equal(projectCompactProgress(progressLine({ closed: true }))?.closed, true);
+  for (const bad of [undefined, null, [], "x", progressLine({ version: 2 }), progressLine({ state: "maybe" }), progressLine({ ms: -1 }), progressLine({ session: 7 })]) {
+    assert.equal(projectCompactProgress(bad), null, `${JSON.stringify(bad)} is not a progress line`);
+  }
+  // a broken counter degrades to 0, which the row reads as "no step counter" instead of guessing
+  assert.equal(projectCompactProgress(progressLine({ step: 1.5 }))?.step, 0);
+});
+
+test("the wire accepts a progress line and rejects a broken one", () => {
+  const view = {
+    schemaVersion: 1, sessionId: "s1", cwd: "/tmp/x", name: "x", model: null, thinkingLevel: null,
+    thinkingLevels: [], idle: false, contextUsage: null, messages: [], pluginEntries: [],
+    compactProgress: progressLine(),
+  };
+  assert.equal(parseBridgeEvent({ type: "snapshot", session: view }).type, "snapshot");
+  assert.throws(() => parseBridgeEvent({ type: "snapshot", session: { ...view, compactProgress: { ...progressLine(), state: "maybe" } } }));
 });

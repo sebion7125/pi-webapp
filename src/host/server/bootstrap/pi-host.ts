@@ -5,7 +5,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { DefaultPackageManager, getAgentDir, ModelRuntime, SessionManager, SettingsManager, VERSION } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels, type AuthInteraction } from "@earendil-works/pi-ai";
 import { startBridge, type Bridge, type BridgeHost, type ConfigChange, type ConfigView, type WorkspaceListView, type WorkspaceSessionView } from "../transport/bridge.ts";
-import { contentBlocks, projectSession, PAUSED_ENTRY, type ViewMessage } from "../sessions/view.ts";
+import { contentBlocks, projectCompactProgress, PROTOKOLL_PROGRESS_CHANNEL, projectSession, PAUSED_ENTRY, type ViewCompactProgress, type ViewMessage } from "../sessions/view.ts";
 import { WorkspaceRegistry, workspaceRegistryPath, workspaceDirectory, requireWorkspaceDirectory, WorkspaceUnavailableError } from "../workspaces/workspaces.ts";
 import { WorkspaceSessions } from "../sessions/workspace-sessions.ts";
 import { sessionsForWorkspace } from "../sessions/sessions-for-workspace.ts";
@@ -44,6 +44,8 @@ interface SharedState {
   replacementSessionId: string | null;
   lastStreamAt: number;
   tuiStreaming: ViewMessage | null;
+  /** live line of a `pi-protokoll` pass that is running in this TUI session */
+  tuiCompactProgress: ViewCompactProgress | null;
   tuiPrompts: EditablePromptQueue;
   tuiPromptSessionId: string | null;
   tuiAgentError: boolean;
@@ -77,6 +79,7 @@ const shared = ((globalThis as Record<symbol, SharedState>)[stateKey] ??= {
   replacementSessionId: null,
   lastStreamAt: 0,
   tuiStreaming: null,
+  tuiCompactProgress: null,
   tuiPrompts: new EditablePromptQueue(() => { if (shared.selected === "tui" && shared.current) shared.bridge?.publish({ type: "snapshot", session: tuiSnapshot() }); void publishWorkspaces(); }),
   tuiPromptSessionId: null,
   tuiAgentError: false,
@@ -99,6 +102,7 @@ shared.tuiGeneration ??= 0;
 shared.stopChanged ??= null;
 shared.tuiWaitController ??= new AbortController();
 shared.tuiStreaming ??= null;
+shared.tuiCompactProgress ??= null;
 shared.tuiPrompts ??= new EditablePromptQueue(() => { if (shared.selected === "tui" && shared.current) shared.bridge?.publish({ type: "snapshot", session: tuiSnapshot() }); void publishWorkspaces(); });
 shared.tuiPromptSessionId ??= null;
 shared.tuiAgentError ??= false;
@@ -134,6 +138,7 @@ function tuiSnapshot() {
   if (shared.current === null) throw new Error("没有活动会话");
   return { ...projectSession(shared.current, shared.current.sessionManager.getSessionName(), shared.tuiCatalog?.ids() ?? []), idle: shared.current.isIdle() && !shared.tuiPrompts.sending,
     streaming: shared.tuiStreaming, queuedPrompts: shared.tuiPrompts.view(), hasPendingPrompts: shared.current.hasPendingMessages?.() ?? false,
+    compactProgress: shared.tuiCompactProgress?.session === shared.current.sessionManager.getSessionId() ? shared.tuiCompactProgress : null,
     interactions: shared.interactions?.pending(shared.current.sessionManager.getSessionId()) ?? [] };
 }
 async function sendTui(sessionId: string, text: string, images: PromptImages, correlation?: ErrorCorrelation, delivery?: "steer" | "followUp") {
@@ -250,7 +255,7 @@ function publishAfterSettling(ctx: ExtensionContext): void {
   let attempts = 0;
   const settle = () => {
     if (shared.current !== ctx || shared.current.sessionManager.getSessionId() !== sessionId) return;
-    if (ctx.isIdle()) { publishSnapshot(ctx); return; }
+    if (ctx.isIdle()) { shared.tuiCompactProgress = null; publishSnapshot(ctx); return; }
     if (++attempts >= 100) return;
     setTimeout(settle, 50);
   };
@@ -421,8 +426,17 @@ export default function piWeb(pi: ExtensionAPI, openPage: (url: string) => Promi
   // Compaction appends its own entries outside the message flow, so the browser needs a snapshot at
   // each edge: the pass starts the working state, the trailing one ends it.
   pi.on("session_before_compact", (_event, ctx) => publishSnapshot(ctx));
-  pi.on("session_compact", (_event, ctx) => { publishSnapshot(ctx); publishAfterSettling(ctx); });
-  pi.on("session_compact_failed", (_event, ctx) => publishSnapshot(ctx));
+  pi.on("session_compact", (_event, ctx) => { shared.tuiCompactProgress = null; publishSnapshot(ctx); publishAfterSettling(ctx); });
+  pi.on("session_compact_failed", (_event, ctx) => { shared.tuiCompactProgress = null; publishSnapshot(ctx); });
+  // The steps of a running pass reach the browser over Pi's shared extension bus: they are never
+  // stored in the session, so the line lives exactly as long as the pass does.
+  pi.events.on(PROTOKOLL_PROGRESS_CHANNEL, (data) => {
+    const progress = projectCompactProgress(data);
+    const active = shared.current;
+    if (!progress || !active || progress.session !== active.sessionManager.getSessionId()) return;
+    shared.tuiCompactProgress = progress.closed ? null : progress;
+    publishSnapshot(active);
+  });
   pi.on("message_update", (event, ctx) => {
     shared.current = ctx;
     if (event.message.role !== "assistant") return;

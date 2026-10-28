@@ -57,7 +57,12 @@ function session(value: unknown): value is SessionView {
       && optional(entry, "afterMessageId", string))(value.pluginEntries)
     && optional(value, "interactions", array(interaction => record(interaction)
       && strings(interaction, ["requestId", "sessionId", "pluginId", "kind"])))
-    && optional(value, "streaming", nullable(message));
+    && optional(value, "streaming", nullable(message))
+    // a live line of a pi-protokoll pass that is still running
+    && optional(value, "compactProgress", nullable(progress => record(progress)
+      && strings(progress, ["session", "run", "title", "label"])
+      && ["wait", "run", "ok", "fail"].includes(progress.state as string) && boolean(progress.closed)
+      && Number.isSafeInteger(progress.step) && Number.isSafeInteger(progress.steps) && number(progress.ms)));
 }
 
 function workspaces(value: unknown): value is WorkspaceListView {

@@ -2,8 +2,8 @@ import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-a
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { displayUserMessage } from "../../../contracts/user-message.ts";
 import type { PluginEntry } from "@chengzhiyi/pi-web-protocol";
-import type { SessionView, ViewBlock, ViewCompact, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
-export type { SessionView, ViewBlock, ViewCompact, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
+import type { SessionView, ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
+export type { SessionView, ViewBlock, ViewCompact, ViewCompactProgress, ViewCompactStep, ViewMessage, ViewProtocol, ViewProtocolSection, ViewUsage } from "../../../contracts/bridge-contract.ts";
 
 export const PAUSED_ENTRY = 'pi-webapp/paused';
 export const RESUME_MESSAGE = 'pi-webapp/resume';
@@ -11,6 +11,8 @@ export const RESUME_MESSAGE = 'pi-webapp/resume';
 export const PROTOKOLL_ENTRY = 'protokoll';
 /** `pi-protokoll` stores how each compaction pass went, including the time of every step, under this customType. */
 export const PROTOKOLL_COMPACT_ENTRY = 'protokoll-compact';
+/** `pi-protokoll` reports the steps of a pass that is still running on this shared extension bus channel. */
+export const PROTOKOLL_PROGRESS_CHANNEL = 'pi-protokoll:progress';
 const PROTOCOL_SECTION_ORDER = ["result", "decision", "files", "open", "rule", "revoke", "index", "tags", "other"];
 const PROTOCOL_MAX_SECTIONS = 24;
 const PROTOCOL_MAX_ITEMS = 20;
@@ -136,6 +138,29 @@ export function projectCompactEntry(data: unknown): ViewCompact | null {
     newlyFolded: compactNumber(entry.newlyFolded),
     pending: compactNumber(entry.pending),
     error: compactText(entry.error),
+  };
+}
+
+/**
+ * One live line from `pi-protokoll`'s bus report. Bus payloads come from another extension, so
+ * anything unusable degrades to null and the browser simply shows nothing.
+ */
+export function projectCompactProgress(data: unknown): ViewCompactProgress | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const line = data as Record<string, unknown>;
+  const state = line.state === "wait" || line.state === "run" || line.state === "ok" || line.state === "fail" ? line.state : null;
+  const whole = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+  if (line.version !== 1 || typeof line.session !== "string" || !state || compactNumber(line.ms) === null) return null;
+  return {
+    session: line.session,
+    run: compactText(line.run) ?? "",
+    title: compactText(line.title) ?? "",
+    step: whole(line.step) ?? 0,
+    steps: whole(line.steps) ?? 0,
+    label: compactText(line.label) ?? "",
+    state,
+    ms: compactNumber(line.ms) as number,
+    closed: line.closed === true,
   };
 }
 

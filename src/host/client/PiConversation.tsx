@@ -18,6 +18,7 @@ import { useActivityElapsed } from "./use-activity-elapsed.ts";
 import { ToolRow, TurnActions, TurnProcess } from "../../../web/src/ui/chat/ProcessRow.tsx";
 import { ProtocolRow } from "../../../web/src/ui/chat/ProtocolRow.tsx";
 import { CompactRow } from "../../../web/src/ui/chat/CompactRow.tsx";
+import { CompactProgressRow } from "../../../web/src/ui/chat/CompactProgressRow.tsx";
 import { useHostedTranscript } from "./hosted/transcript.ts";
 import { conversationTurns, toolResults, toolViewCalls, toolViewTurnKey, type ConversationTurn } from "./conversation-turns.ts";
 import { PiTrajectory } from "../../../web/src/ui/trajectory/PiTrajectory.tsx";
@@ -521,6 +522,7 @@ export function PiConversation({ rightbarControl, composerInteraction, session, 
             <>
               {turns.map((turn) => <PiTurn turn={turn} key={toolViewTurnKey(turn, viewTools)} results={results} model={session?.model ?? null} loadImage={onLoadImage} cwd={session?.cwd} renderPluginSlot={renderPluginSlot} renderToolView={renderToolView} viewTools={viewTools} artifactTools={plugins.flatMap((plugin) => plugin.definition.artifactTools ?? [])} running={turn === turns.at(-1) && !session?.idle || turn.messages.some((message) => message.id === "stream")} onInspect={(id) => { setInspectCallId(id); setActiveTab("trajectory"); }} />)}
               {activity && <AgentActivity state={activity} elapsedSeconds={elapsedSeconds} />}
+              {session?.compactProgress && <CompactProgressRow progress={session.compactProgress} />}
             </>
           </div></div></div> : <PiTrajectory messages={liveMessages} inspectCallId={inspectCallId} />}</div>}
           <div ref={composer} className={conversationCss.composerSeat} data-composer-seat="">

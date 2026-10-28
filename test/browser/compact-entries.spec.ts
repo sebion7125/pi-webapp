@@ -28,6 +28,23 @@ function compactMessage(id: string, durationMs: number, outcome: string): ViewMe
   }))!;
 }
 
+/** A bridge over a session the test can change and publish. */
+function fakeHost(cwd: string, session: () => SessionView): BridgeHost {
+  return {
+    snapshot: session, models: () => [{ provider: "example", id: "model", name: "Example" }], commands: () => [],
+    hosted: {
+      inventory: async () => ({ plugins: [] }), manage: async () => { throw new Error("no fixtures"); },
+      action: async () => { throw new Error("no fixtures"); }, views: async () => { throw new Error("no fixtures"); },
+      asset: async () => null,
+    },
+    async send() {}, abort() {}, async newSession() {}, async setModel() {}, async setThinkingLevel() {},
+    config: () => ({ projectTrusted: false, global: { packages: [], extensions: [], skills: [] }, project: { packages: [], extensions: [], skills: [] }, installed: { packages: [], extensions: [], skills: [] } }),
+    async updateConfig() { return this.config(); },
+    async workspaces() { return { items: [], activeId: null, sessions: [] }; },
+    async addWorkspace() {}, async selectWorkspace() {}, async newSessionInWorkspace() {}, async removeWorkspace() {}, async selectSession() {},
+  };
+}
+
 test("compaction status entries render as a card with duration and step times", async ({ page }) => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-compact-browser-"));
   const text = (id: string, role: "user" | "assistant", content: string): ViewMessage => ({
@@ -42,19 +59,7 @@ test("compaction status entries render as a card with duration and step times", 
     schemaVersion: 1, sessionId: "compact-session", cwd, name: "Compaction chat", model: "example/model",
     thinkingLevel: "off", thinkingLevels: ["off"], idle: true, contextUsage: null, messages, pluginEntries: [], streaming: null,
   };
-  const host: BridgeHost = {
-    snapshot: () => session, models: () => [{ provider: "example", id: "model", name: "Example" }], commands: () => [],
-    hosted: {
-      inventory: async () => ({ plugins: [] }), manage: async () => { throw new Error("no fixtures"); },
-      action: async () => { throw new Error("no fixtures"); }, views: async () => { throw new Error("no fixtures"); },
-      asset: async () => null,
-    },
-    async send() {}, abort() {}, async newSession() {}, async setModel() {}, async setThinkingLevel() {},
-    config: () => ({ projectTrusted: false, global: { packages: [], extensions: [], skills: [] }, project: { packages: [], extensions: [], skills: [] }, installed: { packages: [], extensions: [], skills: [] } }),
-    async updateConfig() { return this.config(); },
-    async workspaces() { return { items: [], activeId: null, sessions: [] }; },
-    async addWorkspace() {}, async selectWorkspace() {}, async newSessionInWorkspace() {}, async removeWorkspace() {}, async selectSession() {},
-  };
+  const host: BridgeHost = fakeHost(cwd, () => session);
   const bridge = await startBridge(host, fileURLToPath(new URL("../../web/dist/", import.meta.url)), new NodeTelemetry({ env: { PI_WEB_SENTRY_ENABLED: "false" }, monitor: false }));
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -106,6 +111,48 @@ test("compaction status entries render as a card with duration and step times", 
     // A reload shows both cards again.
     await page.reload();
     await expect(card).toHaveCount(2);
+    expect(errors).toEqual([]);
+  } finally {
+    await bridge.close();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("the steps of a running pi-protokoll pass show live and leave when it ends", async ({ page }) => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-compact-live-browser-"));
+  let session: SessionView = {
+    schemaVersion: 1, sessionId: "compact-live", cwd, name: "Compaction chat", model: "example/model",
+    thinkingLevel: "off", thinkingLevels: ["off"], idle: false, contextUsage: null,
+    messages: [{ id: "user-1", role: "user", timestamp: "2026-01-01T00:00:00Z", blocks: [{ kind: "text", text: "Compact the session" }] }],
+    pluginEntries: [], streaming: null,
+    compactProgress: { session: "compact-live", run: "compaction", title: "protokoll compaction", step: 3, steps: 5, label: "fold backlog", state: "run", ms: 4200, closed: false },
+  };
+  const bridge = await startBridge(fakeHost(cwd, () => session), fileURLToPath(new URL("../../web/dist/", import.meta.url)), new NodeTelemetry({ env: { PI_WEB_SENTRY_ENABLED: "false" }, monitor: false }));
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.addInitScript(() => { localStorage.setItem("pi-web-locale", "en"); localStorage.setItem("pi-web-theme", "dark"); });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  try {
+    await page.goto(bridge.url);
+    const live = page.locator("[data-compact-progress]");
+    await expect(live).toHaveCount(1);
+    await expect(live).toHaveAttribute("data-compact-progress-steps", "5");
+    await expect(live).toHaveAttribute("data-compact-progress-step", "3");
+    await expect(live).toContainText("protokoll compaction");
+    await expect(live).toContainText("step 3/5");
+    await expect(live).toContainText("fold backlog");
+
+    // the next step arrives with the next line, and nothing lands in the transcript
+    session = { ...session, compactProgress: { ...session.compactProgress!, step: 4, label: "write the summary", ms: 9100 } };
+    bridge.publish({ type: "snapshot", session });
+    await expect(live).toHaveCount(1);
+    await expect(live).toContainText("write the summary");
+    await expect(page.locator("[data-message-role='assistant']")).toHaveCount(0);
+
+    // the pass is over: the line goes away, the stored card arrives with the status entry
+    session = { ...session, idle: true, compactProgress: null };
+    bridge.publish({ type: "snapshot", session });
+    await expect(live).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {
     await bridge.close();
